@@ -130,8 +130,8 @@ async function callAiModel(options: {
 
 
 // Import in-memory data structures
-import { DEFAULT_TWINS, PORTFOLIO_INSIGHTS, KNOWLEDGE_BASE } from "./src/data";
-import { MSMEProfile, AlternateDataSummary, FinancialHealthCard, ForecastPoint, LoanRecommendation, ExplanationNode } from "./src/types";
+import { DEFAULT_TWINS, PORTFOLIO_INSIGHTS, KNOWLEDGE_BASE } from "./src/data.ts";
+import { MSMEProfile, AlternateDataSummary, FinancialHealthCard, ForecastPoint, LoanRecommendation, ExplanationNode } from "./src/types.ts";
 
 const app = express();
 const PORT = 3000;

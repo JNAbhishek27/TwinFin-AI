@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { DigitalTwinState, PortfolioInsight } from "./types";
+import { DigitalTwinState, PortfolioInsight } from "./types.ts";
 
 export const DEFAULT_TWINS: Record<string, DigitalTwinState> = {
   "ananya-foods": {
