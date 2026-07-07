@@ -11,15 +11,123 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
-// Initialize Gemini SDK with telemetry header
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
-    },
-  },
-});
+// Initialize Gemini SDK lazily with telemetry header
+let aiClient: GoogleGenAI | null = null;
+
+function getAiClient() {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("WARNING: GEMINI_API_KEY is not defined. Gemini client will not be initialized.");
+      return null;
+    }
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+  }
+  return aiClient;
+}
+
+// Universal AI Model Caller supporting both Gemini and Groq
+async function callAiModel(options: {
+  systemInstruction?: string;
+  contents: any;
+  jsonResponse?: boolean;
+  responseSchema?: any;
+}) {
+  const { systemInstruction, contents, jsonResponse, responseSchema } = options;
+
+  // 1. Try Groq first if GROQ_API_KEY is configured
+  if (process.env.GROQ_API_KEY) {
+    try {
+      console.log("Using Groq API for text generation...");
+      const messages: any[] = [];
+      if (systemInstruction) {
+        messages.push({ role: "system", content: systemInstruction });
+      }
+
+      // Format contents for Groq
+      if (typeof contents === "string") {
+        messages.push({ role: "user", content: contents });
+      } else if (Array.isArray(contents)) {
+        for (const msg of contents) {
+          const role = msg.role === "model" ? "assistant" : "user";
+          let textContent = "";
+          if (Array.isArray(msg.parts)) {
+            textContent = msg.parts.map((p: any) => p.text || "").join(" ");
+          } else if (typeof msg.parts === "string") {
+            textContent = msg.parts;
+          }
+          messages.push({ role, content: textContent });
+        }
+      } else if (contents && typeof contents === "object") {
+        let textContent = "";
+        if (Array.isArray(contents.parts)) {
+          const textParts = contents.parts.filter((p: any) => p.text);
+          textContent = textParts.map((p: any) => p.text).join("\n");
+        } else if (contents.text) {
+          textContent = contents.text;
+        } else if (contents.inlineData) {
+          textContent = "[Uploaded Financial Document Attachment]";
+        }
+        messages.push({ role: "user", content: textContent || JSON.stringify(contents) });
+      }
+
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages,
+          temperature: 0.7,
+          ...(jsonResponse ? { response_format: { type: "json_object" } } : {})
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Groq API error: status ${response.status}`);
+      }
+
+      const result = await response.json();
+      const text = result.choices?.[0]?.message?.content || "";
+      return text;
+    } catch (groqError) {
+      console.error("Groq API failed, falling back to Gemini/mock:", groqError);
+    }
+  }
+
+  // 2. Try Gemini if GEMINI_API_KEY is configured
+  const ai = getAiClient();
+  if (ai) {
+    try {
+      console.log("Using Gemini API for text generation...");
+      const aiResponse = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents,
+        config: {
+          ...(systemInstruction ? { systemInstruction } : {}),
+          ...(jsonResponse ? { responseMimeType: "application/json" } : {}),
+          ...(responseSchema ? { responseSchema } : {}),
+        },
+      });
+      return aiResponse.text || "";
+    } catch (geminiError) {
+      console.error("Gemini API failed:", geminiError);
+      throw geminiError;
+    }
+  }
+
+  throw new Error("No API keys found (neither GEMINI_API_KEY nor GROQ_API_KEY are configured).");
+}
+
 
 // Import in-memory data structures
 import { DEFAULT_TWINS, PORTFOLIO_INSIGHTS, KNOWLEDGE_BASE } from "./src/data";
@@ -222,19 +330,16 @@ Format the output as a clean JSON with the following schema:
   };
 
   try {
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const aiText = await callAiModel({
       contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
+      jsonResponse: true,
     });
 
-    if (aiResponse.text) {
-      responseJson = JSON.parse(aiResponse.text.trim());
+    if (aiText) {
+      responseJson = JSON.parse(aiText.trim());
     }
   } catch (error) {
-    console.error("Gemini simulation report failed, falling back to math-based generation:", error);
+    console.error("AI simulation report failed, falling back to math-based generation:", error);
   }
 
   res.json({
@@ -317,20 +422,16 @@ ${retrievedContext}
   });
 
   try {
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const aiText = await callAiModel({
+      systemInstruction,
       contents: chatContents,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
     });
 
-    const reply = aiResponse.text || "I apologize, I am processing your financial data. Could you please repeat that?";
+    const reply = aiText || "I apologize, I am processing your financial data. Could you please repeat that?";
     res.json({ reply });
   } catch (error) {
-    console.error("Gemini Copilot API failed:", error);
-    res.status(500).json({ error: "Failed to generate AI response. Please ensure API key is active." });
+    console.error("AI Copilot API failed:", error);
+    res.status(500).json({ error: "Failed to generate AI response. Please ensure your Gemini or Groq API key is active in Vercel." });
   }
 });
 
@@ -401,41 +502,38 @@ Note: For fields that do not apply to this documentType, you should set those fi
       },
     };
 
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const aiText = await callAiModel({
       contents: { parts: [filePart, { text: prompt }] },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            extractedData: {
-              type: Type.OBJECT,
-              properties: {
-                businessName: { type: Type.STRING },
-                pan: { type: Type.STRING },
-                gstin: { type: Type.STRING },
-                invoiceAmount: { type: Type.NUMBER },
-                turnover: { type: Type.NUMBER },
-                avgDailyBalance: { type: Type.NUMBER },
-                employerEPFContrib: { type: Type.NUMBER },
-                date: { type: Type.STRING },
-                confidence: { type: Type.NUMBER },
-              },
-              required: ["businessName", "confidence"],
+      jsonResponse: true,
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          extractedData: {
+            type: Type.OBJECT,
+            properties: {
+              businessName: { type: Type.STRING },
+              pan: { type: Type.STRING },
+              gstin: { type: Type.STRING },
+              invoiceAmount: { type: Type.NUMBER },
+              turnover: { type: Type.NUMBER },
+              avgDailyBalance: { type: Type.NUMBER },
+              employerEPFContrib: { type: Type.NUMBER },
+              date: { type: Type.STRING },
+              confidence: { type: Type.NUMBER },
             },
-            logSummary: { type: Type.STRING },
+            required: ["businessName", "confidence"],
           },
-          required: ["extractedData", "logSummary"],
+          logSummary: { type: Type.STRING },
         },
+        required: ["extractedData", "logSummary"],
       },
     });
 
-    if (aiResponse.text) {
-      responseJson = JSON.parse(aiResponse.text.trim());
+    if (aiText) {
+      responseJson = JSON.parse(aiText.trim());
     }
   } catch (error) {
-    console.error("Gemini OCR extraction failed, falling back to mock parser:", error);
+    console.error("AI OCR extraction failed, falling back to mock parser:", error);
   }
 
   res.json({
