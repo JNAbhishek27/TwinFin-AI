@@ -1,4 +1,4 @@
-# MSME Loan & Credit Advisory Application
+# TwinFin AI - MSME Loan & Credit Advisory Application
 
 An AI-powered MSME Credit Risk Assessment and Loan Advisory application. This app leverages the **Gemini 2.5/3.5 Flash** models to securely analyze financial documents (such as GST filings, bank statements, and invoices) and provide custom borrowing limits, probability of approvals, and improvement roadmaps.
 
