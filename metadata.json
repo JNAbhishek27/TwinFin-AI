@@ -1,0 +1,6 @@
+{
+  "name": "TwinFin AI",
+  "description": "AI-Powered Financial Digital Twin & Decision Intelligence Platform for MSMEs, designed as a credit decisioning and financial inclusion MVP for the IDBI Innovate 2026 Hackathon.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
